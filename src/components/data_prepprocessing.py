@@ -2,10 +2,17 @@ import sys
 from dataclasses import dataclass
 import numpy as np 
 import pandas as pd
+from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder,StandardScaler
 from src.exception import CustomException
 from src.logger import logging
 import os
+from src.utils import save_object
+from sklearn.model_selection import train_test_split
+from src.components.data_transformation import DataTransformation
+#from src.components.data_ingestion import DataIngestion
 
 @dataclass
 class DataCleaningConfig:
@@ -19,71 +26,88 @@ class DataCleaning:
     def initiate_data_cleaning(self):
         logging.info("Entered the data cleaning method or component")
         try:
-            df_train=pd.read_csv("artifacts/train.csv")
-            df_test=pd.read_csv("artifacts/test.csv")
+            df1=pd.read_csv("artifacts/train.csv")
+            df2=pd.read_csv("artifacts/test.csv")
         
-            logging.info('Read the dataset as a pandas dataframe')
-                # Extract day, month, and weekday from 'Date_of_Journey'
-            df_train['Journey_Day'] = pd.to_datetime(df_train['Date_of_Journey'], format='%d/%m/%Y').dt.day.astype(int)
-            df_train['Journey_Month'] = pd.to_datetime(df_train['Date_of_Journey'], format='%d/%m/%Y').dt.month.astype(int)
-            df_train['Journey_Weekday'] = pd.to_datetime(df_train['Date_of_Journey'], format='%d/%m/%Y').dt.weekday.astype(int)
-            logging.info('processing the training dataset as dataframe')
-                # Calculate the duration in minutes from 'Duration'
-            def duration_to_minutes(duration):
-                    duration_list = duration.split()
-                    if len(duration_list) == 2:
-                        return int(duration_list[0][:-1]) * 60 + int(duration_list[1][:-1])
-                    elif 'h' in duration:
-                        return int(duration_list[0][:-1]) * 60
-                    else:
-                        return int(duration_list[0][:-1])
+            logging.info('Read the dataset as dataframe')
 
-            df_train['Duration_minutes'] = df_train['Duration'].apply(duration_to_minutes).astype(int)
 
-                # Convert 'Dep_Time' and 'Arrival_Time' to datetime format and extract hour and minute
-            df_train['Dep_Time'] = pd.to_datetime(df_train['Dep_Time'])
-            df_train['Dep_Hour'] = df_train['Dep_Time'].dt.hour.astype(int)
-            df_train['Dep_Minute'] = df_train['Dep_Time'].dt.minute.astype(int)
+            df1['Journey_day']=pd.to_datetime(df1['Date_of_Journey'],format="%d/%m/%Y").dt.day
+            df1['Journey_month']=pd.to_datetime(df1['Date_of_Journey'],format="%d/%m/%Y").dt.month
+            df1['Journey_year']=pd.to_datetime(df1['Date_of_Journey'],format="%d/%m/%Y").dt.year
+            df1= df1.drop(['Date_of_Journey'], axis=1)
+            logging.info('processingthe training dataset as dataframe')
+            df1['hours']=pd.to_datetime(df1['Dep_Time']).dt.hour
+            df1['minutes']=pd.to_datetime(df1['Dep_Time']).dt.minute
+            df1.drop(["Dep_Time"], axis = 1, inplace = True)
+            df1["Arrival_hour"] = pd.to_datetime(df1.Arrival_Time).dt.hour
+            df1["Arrival_min"] = pd.to_datetime(df1.Arrival_Time).dt.minute
+            df1 = df1.drop(["Additional_Info"],axis=1)
+            duration = list(df1["Duration"])
 
-            df_train['Arrival_Time'] = pd.to_datetime(df_train['Arrival_Time'])
-            df_train['Arrival_Hour'] = df_train['Arrival_Time'].dt.hour.astype(int)
-            df_train['Arrival_Minute'] = df_train['Arrival_Time'].dt.minute.astype(int)
-            df_train.dropna(inplace=True)
-                # Drop the following columns 'Date_of_Journey', 'Dep_Time', 'Arrival_Time', 'Duration'
-            df_train= df_train.drop(['Date_of_Journey', 'Dep_Time', 'Arrival_Time', 'Duration', 'Route'], axis = 1)
-            
-
-            # Extract day, month, and weekday from 'Date_of_Journey'
-            df_test['Journey_Day'] = pd.to_datetime(df_test['Date_of_Journey'], format='%d/%m/%Y').dt.day.astype(int)
-            df_test['Journey_Month'] = pd.to_datetime(df_test['Date_of_Journey'], format='%d/%m/%Y').dt.month.astype(int)
-            df_test['Journey_Weekday'] = pd.to_datetime(df_test['Date_of_Journey'], format='%d/%m/%Y').dt.weekday.astype(int)
-
-                # Calculate the duration in minutes from 'Duration'
-            def duration_to_minutes(duration):
-                duration_list = duration.split()
-                if len(duration_list) == 2:
-                    return int(duration_list[0][:-1]) * 60 + int(duration_list[1][:-1])
-                elif 'h' in duration:
-                    return int(duration_list[0][:-1]) * 60
-                else:
-                    return int(duration_list[0][:-1])
-
-            df_test['Duration_minutes'] = df_test['Duration'].apply(duration_to_minutes).astype(int)
-
-            # Convert 'Dep_Time' and 'Arrival_Time' to datetime format and extract hour and minute
-            df_test['Dep_Time'] = pd.to_datetime(df_test['Dep_Time'])
-            df_test['Dep_Hour'] = df_test['Dep_Time'].dt.hour.astype(int)
-            df_test['Dep_Minute'] = df_test['Dep_Time'].dt.minute.astype(int)
-
-            df_test['Arrival_Time'] = pd.to_datetime(df_test['Arrival_Time'])
-            df_test['Arrival_Hour'] = df_test['Arrival_Time'].dt.hour.astype(int)
-            df_test['Arrival_Minute'] = df_test['Arrival_Time'].dt.minute.astype(int)
-            df_test.dropna(inplace=True)
-                # Drop the following columns 'Date_of_Journey', 'Dep_Time', 'Arrival_Time', 'Duration'
-            df_test = df_test.drop(['Date_of_Journey', 'Dep_Time', 'Arrival_Time', 'Duration', 'Route'], axis = 1)
+            for i in range(len(duration)):
                 
+                if len(duration[i].split()) != 2:
+                      # Check if duration contains only hour or mins
+                    if "h" in duration[i]:
+                    
+                        duration[i] = duration[i].strip() + " 0m"   # Adds 0 minute
+                    else:
+                        
+                        duration[i] = "0h " + duration[i]  
+                        
+            duration_hours = []
+            duration_mins = []
+            for i in range(len(duration)):
+                duration_hours.append(int(duration[i].split(sep = "h")[0]))    # Extract hours from duration
+                duration_mins.append(int(duration[i].split(sep = "m")[0].split()[-1]))   # Extracts only minutes from duration
+            df1["duration_mins"]= duration_mins
+            df1["duration_hours"]= duration_hours
+            df1 = df1.drop(["Duration"],axis=1)
+            df1 = df1.drop(["Arrival_Time"],axis=1) 
+            df1 = df1.drop(["Route"],axis=1)
+            df1.replace({"non-stop": 0, "1 stop": 1, "2 stops": 2, "3 stops": 3, "4 stops": 4}, inplace = True)
 
+
+            df2['Journey_day']=pd.to_datetime(df2['Date_of_Journey'],format="%d/%m/%Y").dt.day
+            df2['Journey_month']=pd.to_datetime(df2['Date_of_Journey'],format="%d/%m/%Y").dt.month
+            df2['Journey_year']=pd.to_datetime(df2['Date_of_Journey'],format="%d/%m/%Y").dt.year
+            df2= df2.drop(['Date_of_Journey'], axis=1)
+            df2['hours']=pd.to_datetime(df2['Dep_Time']).dt.hour
+            df2['minutes']=pd.to_datetime(df2['Dep_Time']).dt.minute
+            df2.drop(["Dep_Time"], axis = 1, inplace = True)
+            df2["Arrival_hour"] = pd.to_datetime(df2.Arrival_Time).dt.hour
+            df2["Arrival_min"] = pd.to_datetime(df2.Arrival_Time).dt.minute
+            df2 = df2.drop(["Additional_Info"],axis=1)
+            logging.info('processingthe test dataset as dataframe')
+            duration = list(df2["Duration"])
+
+            for i in range(len(duration)):
+                #logging.info('entered the loop')
+                
+                if len(duration[i].split()) != 2:
+                      # Check if duration contains only hour or mins
+                    if "h" in duration[i]:
+                    
+                        duration[i] = duration[i].strip() + " 0m"   # Adds 0 minute
+                    else:
+                        
+                        duration[i] = "0h " + duration[i]  
+            logging.info('ended the loop')
+            duration_hours = []
+            duration_mins = []
+            for i in range(len(duration)):
+                #logging.info('entered the loop')
+                duration_hours.append(int(duration[i].split(sep = "h")[0]))    # Extract hours from duration
+                duration_mins.append(int(duration[i].split(sep = "m")[0].split()[-1]))   # Extracts only minutes from duration
+            df2["duration_mins"]= duration_mins
+            df2["duration_hours"]= duration_hours
+            df2 = df2.drop(["Duration"],axis=1)
+            df2 = df2.drop(["Arrival_Time"],axis=1)
+            df2 = df2.drop(["Route"],axis=1)
+            df2.replace({"non-stop": 0, "1 stop": 1, "2 stops": 2, "3 stops": 3, "4 stops": 4}, inplace = True)
             
+
             logging.info('ended he loop') 
         
             logging.info('returning done') 
@@ -92,15 +116,17 @@ class DataCleaning:
             logging.info('directory created')
 
 
-            df_train.to_csv(self.cleaning_config.train_data_path_cleaned,index=False,header=True)
-            logging.info('Preprocessed Train data saved')
-            df_test.to_csv(self.cleaning_config.test_data_path_cleaned,index=False,header=True)
-            logging.info('Preprocessed test data saved')
+            df1.to_csv(self.cleaning_config.train_data_path_cleaned,index=False,header=True)
+            logging.info('df1 saved')
+            df2.to_csv(self.cleaning_config.test_data_path_cleaned,index=False,header=True)
+            logging.info('df2 saved')
 
             logging.info("Train test data cleaned")
-            return df_train, df_test
-            logging.info("returned df_train and df_test")       
-      
+            return df1,df2 
+            logging.info("returned df1 and df2")
+            # Adds 0 hour
+
+        
         except Exception as e:
             raise CustomException(e,sys)
     
